@@ -45,11 +45,10 @@ void ArenaCameraNode::parse_parameters_()
 {
   std::string nextParameterToDeclare = "";
   try {
-    nextParameterToDeclare = "serial";
-    serial_ = this->declare_parameter("serial", "");
-    is_passed_serial_ = serial_ != "";
-    log_info(serial_);
-
+    int serial_integer = this->declare_parameter<int>("serial", 0);
+    serial_ = std::to_string(serial_integer);
+    is_passed_serial_ = serial_integer != 0;
+      
     nextParameterToDeclare = "pixelformat";
     pixelformat_ros_ = this->declare_parameter("pixelformat", "");
     is_passed_pixelformat_ros_ = pixelformat_ros_ != "";
@@ -73,7 +72,13 @@ void ArenaCameraNode::parse_parameters_()
     exposure_time_ = this->declare_parameter("exposure_time", -1.0);
     is_passed_exposure_time_ = exposure_time_ >= 0;
 
-    // log_info(std::to_string(exposure_time_));
+    nextParameterToDeclare = "target_brightness";
+    target_brightness_ = this->declare_parameter("target_brightness", -1);
+    is_passed_target_brightness_ = target_brightness_ >= 0;
+
+    nextParameterToDeclare = "gamma";
+    gamma_ = this->declare_parameter("gamma", -1.0);
+    is_passed_gamma_ = gamma_ >= 0;
 
     nextParameterToDeclare = "trigger_mode";
     trigger_mode_activated_ = this->declare_parameter("trigger_mode", false);
@@ -81,12 +86,18 @@ void ArenaCameraNode::parse_parameters_()
 
     nextParameterToDeclare = "encoder_divider";
     encoder_divider_ = this->declare_parameter("encoder_divider", 65535);
+    nextParameterToDeclare = "frame_rate";
+    frame_rate_ = this->declare_parameter("frame_rate", 30.0);
+
+    nextParameterToDeclare = "camera_name";
+    camera_name_ = this->declare_parameter("camera_name", "arena_camera");
+    // no need to is_passed_camera_name_
 
     nextParameterToDeclare = "topic";
     topic_ = this->declare_parameter(
         "topic", std::string("/") + this->get_name() + "/images");
     // no need to is_passed_topic_
-
+    
     nextParameterToDeclare = "qos_history";
     pub_qos_history_ = this->declare_parameter("qos_history", "");
     is_passed_pub_qos_history_ = pub_qos_history_ != "";
@@ -259,7 +270,17 @@ void ArenaCameraNode::run_()
   m_pDevice.reset(device);
   set_nodes_();
   m_pDevice->StartStream();
-  publish_images_();
+
+  if (is_passed_target_brightness_) {
+    Arena::SetNodeValue<GenICam::gcstring>(m_pDevice->GetNodeMap(), "ExposureAuto", "Once");
+    log_info("\tExposureAuto set to Once (will lock after convergence)");
+  }
+
+  if (!trigger_mode_activated_) {
+    publish_images_();
+  } else {
+    // else ros::spin will
+  }
 }
 
 void ArenaCameraNode::publish_images_()
@@ -279,14 +300,22 @@ void ArenaCameraNode::publish_images_()
       log_debug(std::string("image ") + std::to_string(pImage->GetFrameId()) +
                 " published to " + topic_);
       this->m_pDevice->RequeueBuffer(pImage);
+      pImage = nullptr;
 
+    } catch (GenICam::GenericException& e) {
+      if (pImage) {
+        this->m_pDevice->RequeueBuffer(pImage);
+        pImage = nullptr;
+      }
+      log_warn(std::string("GenICam exception while publishing an image\n") +
+               e.what());
     } catch (std::exception& e) {
       if (pImage) {
         m_pDevice->RequeueBuffer(pImage);
         pImage = nullptr;
-        log_warn(std::string("Exception occurred while publishing an image\n") +
-                 e.what());
       }
+      log_warn(std::string("Exception occurred while publishing an image\n") +
+               e.what());
     }
   };
 }
@@ -303,8 +332,7 @@ void ArenaCameraNode::msg_form_image_(Arena::IImage* pImage,
         static_cast<uint32_t>(pImage->GetTimestampNs() / 1000000000);
     image_msg.header.stamp.nanosec =
         static_cast<uint32_t>(pImage->GetTimestampNs() % 1000000000);
-    image_msg.header.frame_id = frame_id_;
-    // image_msg.header.frame_id = std::to_string(pImage->GetFrameId());
+    image_msg.header.frame_id = camera_name_;
 
     //
     // 2 ) Height
@@ -460,8 +488,15 @@ void ArenaCameraNode::set_nodes_()
   set_nodes_roi_();
   set_nodes_gain_();
   set_nodes_pixelformat_();
-  set_nodes_trigger_mode_();
   set_nodes_exposure_();
+  set_nodes_target_brightness_();
+  set_nodes_gamma_();
+  set_nodes_trigger_mode_();
+  set_nodes_ptp_();
+  set_nodes_frame_rate_();
+  // configure Auto Negotiate Packet Size and Packet Resend
+  Arena::SetNodeValue<bool>(m_pDevice->GetTLStreamNodeMap(), "StreamAutoNegotiatePacketSize", true);
+  Arena::SetNodeValue<bool>(m_pDevice->GetTLStreamNodeMap(), "StreamPacketResendEnable", true);
 
   // Configure Auto Negotiate Packet Size and Packet Resend
   Arena::SetNodeValue<bool>(m_pDevice->GetTLStreamNodeMap(), "StreamAutoNegotiatePacketSize", true);
@@ -572,6 +607,25 @@ void ArenaCameraNode::set_nodes_exposure_()
   }
 }
 
+void ArenaCameraNode::set_nodes_target_brightness_()
+{
+  if (is_passed_target_brightness_) {
+    auto nodemap = m_pDevice->GetNodeMap();
+    Arena::SetNodeValue<GenICam::gcstring>(nodemap, "ExposureAuto", "Continuous");
+    Arena::SetNodeValue<int64_t>(nodemap, "TargetBrightness", target_brightness_);
+    log_info(std::string("\tTargetBrightness set to ") + std::to_string(target_brightness_));
+  }
+}
+
+void ArenaCameraNode::set_nodes_gamma_()
+{
+  if (is_passed_gamma_) {
+    auto nodemap = m_pDevice->GetNodeMap();
+    Arena::SetNodeValue<double>(nodemap, "Gamma", gamma_);
+    log_info(std::string("\tGamma set to ") + std::to_string(gamma_));
+  }
+}
+
 void ArenaCameraNode::set_nodes_trigger_mode_()
 {
   auto nodemap = m_pDevice->GetNodeMap();
@@ -620,6 +674,22 @@ void ArenaCameraNode::set_nodes_trigger_mode_()
     auto msg = std::string("\ttrigger_mode is OFF");
     log_warn(msg);
   }
+}
+
+void ArenaCameraNode::set_nodes_ptp_()
+{
+  auto nodemap = m_pDevice->GetNodeMap();
+  Arena::SetNodeValue<bool>(nodemap, "PtpEnable", true);
+  Arena::SetNodeValue<bool>(nodemap, "PtpSlaveOnly", true);
+  log_info("\tPTP enabled (slave-only mode)");
+}
+
+void ArenaCameraNode::set_nodes_frame_rate_()
+{
+  auto nodemap = m_pDevice->GetNodeMap();
+  Arena::SetNodeValue<bool>(nodemap, "AcquisitionFrameRateEnable", true);
+  Arena::SetNodeValue<double>(nodemap, "AcquisitionFrameRate", frame_rate_);
+  log_info(std::string("\tAcquisitionFrameRate set to ") + std::to_string(frame_rate_));
 }
 
 // just for debugging

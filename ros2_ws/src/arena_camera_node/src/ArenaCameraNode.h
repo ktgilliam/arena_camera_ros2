@@ -38,6 +38,26 @@ class ArenaCameraNode : public rclcpp::Node
   void log_info(std::string msg)  { RCLCPP_INFO(this->get_logger(), msg.c_str()); }
   void log_warn(std::string msg)  { RCLCPP_WARN(this->get_logger(), msg.c_str()); }
   void log_err(std::string msg)   { RCLCPP_ERROR(this->get_logger(), msg.c_str()); }
+  ~ArenaCameraNode()
+  {
+    log_info("Destroying node");
+    if (m_pDevice) {
+      try {
+        m_pDevice->StopStream();
+      } catch (...) {}
+      m_pSystem->DestroyDevice(m_pDevice.get());
+      m_pDevice = nullptr;
+    }
+    if (m_pSystem) {
+      Arena::CloseSystem(m_pSystem.get());
+      m_pSystem = nullptr;
+    }
+  }
+
+  void log_debug(std::string msg) { RCLCPP_DEBUG(this->get_logger(), msg.c_str()); };
+  void log_info(std::string msg) { RCLCPP_INFO(this->get_logger(), msg.c_str()); };
+  void log_warn(std::string msg) { RCLCPP_WARN(this->get_logger(), msg.c_str()); };
+  void log_err(std::string msg) { RCLCPP_ERROR(this->get_logger(), msg.c_str()); };
 
  private:
   // ---- Arena SDK -----------------------------------------------------------
@@ -55,6 +75,7 @@ class ArenaCameraNode : public rclcpp::Node
   bool        is_passed_serial_;
 
   std::string topic_;
+  std::string camera_name_;
 
   size_t width_;
   bool   is_passed_width;
@@ -68,12 +89,20 @@ class ArenaCameraNode : public rclcpp::Node
   double exposure_time_;
   bool   is_passed_exposure_time_;
 
+  int64_t target_brightness_;
+  bool is_passed_target_brightness_;
+
+  double gamma_;
+  bool is_passed_gamma_;
+
   std::string pixelformat_pfnc_;
   std::string pixelformat_ros_;
   bool        is_passed_pixelformat_ros_;
 
   bool trigger_mode_activated_;
   int encoder_divider_;
+
+  double frame_rate_;
 
   std::string pub_qos_history_;
   bool        is_passed_pub_qos_history_;
@@ -104,7 +133,11 @@ class ArenaCameraNode : public rclcpp::Node
   void set_nodes_gain_();
   void set_nodes_pixelformat_();
   void set_nodes_exposure_();
+  void set_nodes_target_brightness_();
+  void set_nodes_gamma_();
   void set_nodes_trigger_mode_();
+  void set_nodes_ptp_();
+  void set_nodes_frame_rate_();
   void set_nodes_test_pattern_image_();
 
   // Streaming
