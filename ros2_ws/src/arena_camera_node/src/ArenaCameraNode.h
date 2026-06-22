@@ -54,11 +54,6 @@ class ArenaCameraNode : public rclcpp::Node
     }
   }
 
-  void log_debug(std::string msg) { RCLCPP_DEBUG(this->get_logger(), msg.c_str()); };
-  void log_info(std::string msg) { RCLCPP_INFO(this->get_logger(), msg.c_str()); };
-  void log_warn(std::string msg) { RCLCPP_WARN(this->get_logger(), msg.c_str()); };
-  void log_err(std::string msg) { RCLCPP_ERROR(this->get_logger(), msg.c_str()); };
-
  private:
   // ---- Arena SDK -----------------------------------------------------------
   std::shared_ptr<Arena::ISystem> m_pSystem;
